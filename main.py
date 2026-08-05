@@ -127,4 +127,4 @@ async def panel_vpn(ctx):
     embed = create_dashboard_embed()
     await ctx.send(embed=embed, view=VPNControlView())
 
-bot.run("DISCORD_TOKEN")
+bot.run(os.environ.get("DISCORD_TOKEN"))
