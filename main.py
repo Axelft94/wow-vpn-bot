@@ -27,18 +27,18 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # Lista de usuarios fijos
 FIXED_USERS = ["monkhal", "Randy", "Ethan", "Vilum", "Aldo"]
 
-# Estado en memoria de usuarios fijos e invitados
+# Memoria de usuarios
 user_status = {name: {"status": "OFF", "vpn": "Sin asignar"} for name in FIXED_USERS}
 guests_status = {}
 
 def create_dashboard_embed():
     embed = discord.Embed(
         title="🛡️ Panel de Control de VPN Mullvad",
-        description="Presiona los botones para cambiar tu estado **ON / OFF** o editar tu VPN.",
+        description="Selecciona tu usuario fijo en el menú o usa los botones de invitados.",
         color=discord.Color.blue()
     )
 
-    # Lista de Usuarios Fijos (Conserva la VPN al estar OFF)
+    # Usuarios Fijos (Conserva la VPN siempre)
     fixed_text = ""
     for name in FIXED_USERS:
         info = user_status[name]
@@ -49,7 +49,7 @@ def create_dashboard_embed():
 
     embed.add_field(name="👥 Usuarios Fijos", value=fixed_text, inline=False)
 
-    # Lista de Usuarios Invitados (Solo se muestran los activos)
+    # Usuarios Invitados (Solo se muestran los activos)
     guest_text = ""
     if not guests_status:
         guest_text = "*No hay invitados activos.*"
@@ -61,111 +61,134 @@ def create_dashboard_embed():
     embed.set_footer(text="WoW Carrys VPN Tracker • Actualizado en tiempo real")
     return embed
 
-# Ventana emergente para ponerse en ON
-class OnModal(discord.ui.Modal, title="Conectarse a VPN (ON)"):
+# Ventana para Editar la VPN de un Usuario Fijo
+class EditFixedVpnModal(discord.ui.Modal):
+    def __init__(self, user_name: str):
+        super().__init__(title=f"Editar VPN de {user_name}")
+        self.user_name = user_name
+        
+        current_vpn = user_status[user_name]["vpn"]
+        default_val = current_vpn if current_vpn != "Sin asignar" else ""
+        
+        self.nueva_vpn = discord.ui.TextInput(
+            label=f"Nombre de VPN para {user_name}",
+            placeholder="Ej: holy cicada, silent-tiger...",
+            default=default_val,
+            required=True
+        )
+        self.add_item(self.nueva_vpn)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        vpn_val = self.nueva_vpn.value.strip()
+        user_status[self.user_name]["vpn"] = vpn_val
+        
+        embed = create_dashboard_embed()
+        await interaction.message.edit(embed=embed)
+        await interaction.response.send_message(f"✏️ La VPN de **{self.user_name}** se cambió a `{vpn_val}`.", ephemeral=True)
+
+# Ventana para Invitado ON
+class GuestOnModal(discord.ui.Modal, title="Conectar Invitado (ON)"):
     nombre = discord.ui.TextInput(
-        label="Nombre de usuario",
-        placeholder="Ej: monkhal, Randy... o tu nombre de invitado",
+        label="Nombre de Invitado",
+        placeholder="Ej: sylph, invitado1...",
         required=True
     )
     vpn_user = discord.ui.TextInput(
         label="Usuario / Nombre de VPN en uso",
-        placeholder="Ej: little rabbit, silent-tiger...",
+        placeholder="Ej: little rabbit...",
         required=True
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        input_name = self.nombre.value.strip()
+        g_name = self.nombre.value.strip()
         vpn_val = self.vpn_user.value.strip()
-
-        match_fixed = next((f for f in FIXED_USERS if f.lower() == input_name.lower()), None)
-
-        if match_fixed:
-            user_status[match_fixed] = {"status": "ON", "vpn": vpn_val}
-            msg = f"🟢 **{match_fixed}** ahora está en **ON** con la VPN `{vpn_val}`."
-        else:
-            guests_status[input_name] = {"status": "ON", "vpn": vpn_val}
-            msg = f"🟢 **{input_name}** (Invitado) ahora está en **ON** con la VPN `{vpn_val}`."
+        guests_status[g_name] = {"status": "ON", "vpn": vpn_val}
 
         embed = create_dashboard_embed()
         await interaction.message.edit(embed=embed)
-        await interaction.response.send_message(msg, ephemeral=True)
+        await interaction.response.send_message(f"🟢 Invitado **{g_name}** conectado en **ON** con VPN `{vpn_val}`.", ephemeral=True)
 
-# Ventana emergente para ponerse en OFF
-class OffModal(discord.ui.Modal, title="Desconectarse de VPN (OFF)"):
+# Ventana para Invitado OFF
+class GuestOffModal(discord.ui.Modal, title="Desconectar Invitado (OFF)"):
     nombre = discord.ui.TextInput(
-        label="Nombre de usuario",
-        placeholder="Ej: monkhal, Randy... o tu nombre de invitado",
+        label="Nombre de Invitado a desconectar",
+        placeholder="Ej: sylph...",
         required=True
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        input_name = self.nombre.value.strip()
+        g_name = self.nombre.value.strip()
+        match_guest = next((g for g in guests_status if g.lower() == g_name.lower()), None)
 
-        match_fixed = next((f for f in FIXED_USERS if f.lower() == input_name.lower()), None)
-
-        if match_fixed:
-            # En usuarios fijos solo cambiamos estado a OFF (mantiene el nombre de VPN)
-            user_status[match_fixed]["status"] = "OFF"
-            vpn_actual = user_status[match_fixed]["vpn"]
-            msg = f"🔴 **{match_fixed}** se ha puesto en **OFF** (VPN: `{vpn_actual}`)."
+        if match_guest:
+            del guests_status[match_guest]
+            msg = f"🔴 Invitado **{match_guest}** se ha puesto en **OFF** y fue eliminado de la lista."
         else:
-            match_guest = next((g for g in guests_status if g.lower() == input_name.lower()), None)
-            if match_guest:
-                # En invitados se elimina por completo de la lista
-                del guests_status[match_guest]
-                msg = f"🔴 **{match_guest}** (Invitado) se ha puesto en **OFF** y fue removido de la lista."
-            else:
-                msg = f"⚠️ No se encontró al usuario '{input_name}' en la lista."
+            msg = f"⚠️ No se encontró al invitado '{g_name}' en la lista activa."
 
         embed = create_dashboard_embed()
         await interaction.message.edit(embed=embed)
         await interaction.response.send_message(msg, ephemeral=True)
 
-# Ventana emergente para editar la VPN de un usuario fijo
-class EditVpnModal(discord.ui.Modal, title="Editar VPN de Usuario Fijo"):
-    nombre = discord.ui.TextInput(
-        label="Nombre del usuario fijo",
-        placeholder="Ej: monkhal, Randy, Ethan...",
-        required=True
-    )
-    nueva_vpn = discord.ui.TextInput(
-        label="Nuevo nombre de VPN",
-        placeholder="Ej: fast-bear, silent-fox...",
-        required=True
-    )
+# Menú Desplegable para seleccionar Usuario Fijo
+class FixedUserSelect(discord.ui.Select):
+    def __init__(self):
+        options = [
+            discord.SelectOption(label=name, value=name, description=f"Usuario Fijo: {name}")
+            for name in FIXED_USERS
+        ]
+        super().__init__(placeholder="👇 Selecciona un usuario fijo...", min_values=1, max_values=1, options=options)
 
-    async def on_submit(self, interaction: discord.Interaction):
-        input_name = self.nombre.value.strip()
-        vpn_val = self.nueva_vpn.value.strip()
+    async def callback(self, interaction: discord.Interaction):
+        self.view.selected_user = self.values[0]
+        await interaction.response.defer()
 
-        match_fixed = next((f for f in FIXED_USERS if f.lower() == input_name.lower()), None)
-
-        if match_fixed:
-            user_status[match_fixed]["vpn"] = vpn_val
-            msg = f"✏️ Se actualizó la VPN de **{match_fixed}** a `{vpn_val}`."
-        else:
-            msg = f"⚠️ '{input_name}' no es un usuario fijo."
-
-        embed = create_dashboard_embed()
-        await interaction.message.edit(embed=embed)
-        await interaction.response.send_message(msg, ephemeral=True)
-
+# Vista Principal con Controles
 class VPNControlView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
+        self.selected_user = None
+        self.add_item(FixedUserSelect())
 
-    @discord.ui.button(label="🟢 Conectar (ON)", style=discord.ButtonStyle.green, custom_id="vpn_on_btn")
-    async def btn_on(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(OnModal())
+    @discord.ui.button(label="🟢 Fijo ON", style=discord.ButtonStyle.green, row=1)
+    async def btn_fixed_on(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.selected_user:
+            await interaction.response.send_message("⚠️ Primero debes seleccionar tu nombre en el menú desplegable.", ephemeral=True)
+            return
 
-    @discord.ui.button(label="🔴 Desconectar (OFF)", style=discord.ButtonStyle.red, custom_id="vpn_off_btn")
-    async def btn_off(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(OffModal())
+        user_status[self.selected_user]["status"] = "ON"
+        vpn_curr = user_status[self.selected_user]["vpn"]
+        embed = create_dashboard_embed()
+        await interaction.message.edit(embed=embed)
+        await interaction.response.send_message(f"🟢 **{self.selected_user}** pasa a **ON** (VPN: `{vpn_curr}`).", ephemeral=True)
 
-    @discord.ui.button(label="✏️ Editar VPN", style=discord.ButtonStyle.secondary, custom_id="vpn_edit_btn")
-    async def btn_edit(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(EditVpnModal())
+    @discord.ui.button(label="🔴 Fijo OFF", style=discord.ButtonStyle.red, row=1)
+    async def btn_fixed_off(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.selected_user:
+            await interaction.response.send_message("⚠️ Primero debes seleccionar tu nombre en el menú desplegable.", ephemeral=True)
+            return
+
+        user_status[self.selected_user]["status"] = "OFF"
+        vpn_curr = user_status[self.selected_user]["vpn"]
+        embed = create_dashboard_embed()
+        await interaction.message.edit(embed=embed)
+        await interaction.response.send_message(f"🔴 **{self.selected_user}** pasa a **OFF** (VPN: `{vpn_curr}`).", ephemeral=True)
+
+    @discord.ui.button(label="✏️ Editar VPN", style=discord.ButtonStyle.secondary, row=1)
+    async def btn_fixed_edit(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.selected_user:
+            await interaction.response.send_message("⚠️ Primero debes seleccionar un usuario fijo en el menú desplegable.", ephemeral=True)
+            return
+
+        await interaction.response.send_modal(EditFixedVpnModal(self.selected_user))
+
+    @discord.ui.button(label="🎟️ Invitado ON", style=discord.ButtonStyle.primary, row=2)
+    async def btn_guest_on(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(GuestOnModal())
+
+    @discord.ui.button(label="🎟️ Invitado OFF", style=discord.ButtonStyle.gray, row=2)
+    async def btn_guest_off(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(GuestOffModal())
 
 @bot.event
 async def on_ready():
